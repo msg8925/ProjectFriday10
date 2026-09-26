@@ -10,7 +10,7 @@ window.TEST_CONFIG = {
   // marks locally using teacher-only/answer-key.js, so you can preview it on your own computer.
   appsScriptUrl: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE',
   // Must match SHARED_KEY in Code.gs. Stops random people posting to your script.
-  sharedKey: 'change-this-to-a-random-phrase',
+  sharedKey: 'g7dD@#F90Dh32n$H5H30!JFF!d-!5#l',
 
   // Show a "Start code" box. Set the code itself in Code.gs (START_CODE) so students can't read it here.
   askStartCode: true,
