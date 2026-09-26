@@ -365,7 +365,21 @@ function api(payload) {
   payload.key = CFG.sharedKey; payload.testId = EXAM.meta.testId;
   // text/plain keeps this a "simple" request (no CORS preflight), which Apps Script needs.
   return fetch(CFG.appsScriptUrl, { method: 'POST', body: JSON.stringify(payload), headers: { 'Content-Type': 'text/plain;charset=utf-8' }, redirect: 'follow' })
-    .then(function (r) { return r.json(); });
+    .catch(function (e) { var er = new Error('network: ' + e.message); er.kind = 'network'; throw er; })
+    .then(function (r) {
+      return r.text().then(function (t) {
+        try { return JSON.parse(t); }
+        catch (e) {
+          var m = /<title>([^<]*)<\/title>/i.exec(t), er = new Error('The server sent a web page instead of data' + (m ? ' ("' + m[1].trim() + '")' : '') + '.');
+          er.kind = 'notjson'; er.status = r.status; throw er;
+        }
+      });
+    });
+}
+function connectMsg(e) {
+  var tip = ' <br><small>Teacher: open this page with <code>?check</code> at the end of the address to find the problem.</small>';
+  if (e && e.kind === 'notjson') return 'The test server is not set up correctly. ' + esc(e.message) + tip;
+  return 'Could not reach the test server. If other websites work, the problem is the test set-up, not your internet.' + tip;
 }
 function loadLocalKey(cb) {
   if (SERVER || window.ANSWER_KEY) { LOCAL_KEY = window.ANSWER_KEY || null; return cb(); }
@@ -590,8 +604,8 @@ function confirmBegin() {
               : 'Something went wrong: ' + esc((j && j.error) || 'unknown error') + '. Tell your teacher.';
       $('#mErr').innerHTML = '<div class="errbox">' + msg + '</div>'; btn.disabled = false; btn.textContent = 'Yes, begin the test';
     })
-    .catch(function () {
-      $('#mErr').innerHTML = '<div class="errbox">Could not connect. Check the internet connection and press the button again.</div>';
+    .catch(function (e) {
+      $('#mErr').innerHTML = '<div class="errbox">' + connectMsg(e) + '</div>';
       btn.disabled = false; btn.textContent = 'Try again';
     });
 }
@@ -753,7 +767,7 @@ function submitNow() {
       if (j && j.ok && j.result) finishWith(j.result);
       else submitFailed('The marking server replied: ' + esc((j && j.error) || 'unknown error') + '. Tell your teacher.', true);
     })
-    .catch(function () { submitFailed('Could not reach the marking server. Check the internet connection.', true); });
+    .catch(function (e) { submitFailed(connectMsg(e), true); });
 }
 function submitFailed(msg, retry) {
   state.submitError = msg; save(); showSubmitting();
@@ -950,12 +964,55 @@ function sendReports() {
 document.addEventListener('visibilitychange', function () { if (document.hidden && state.phase === 'exam') { state.tabSwitches++; save(); } });
 window.addEventListener('beforeunload', function (e) { if (state.phase === 'exam' || state.phase === 'submitting') { e.preventDefault(); e.returnValue = ''; } });
 
+/* ================================================================
+   Set-up checker:  index.html?check
+   ================================================================ */
+function showCheck() {
+  $('#bar').hidden = true;
+  var url = CFG.appsScriptUrl || '', rows = [];
+  $('#app').innerHTML = '<main class="sheet"><div class="sheet-inner"><h1 style="font-size:30px">Set-up checker</h1>' +
+    '<p style="color:var(--muted)">For the teacher. This page tests the connection between this test and your Google Apps Script. Students never see it.</p><div id="chk"></div></div></main>';
+  function add(ok, title, detail) {
+    rows.push('<div class="' + (ok === true ? 'okbox' : ok === false ? 'errbox' : 'warnbox') + '"><b>' + (ok === true ? '✓ ' : ok === false ? '✗ ' : '… ') + title + '</b>' + (detail ? '<div style="margin-top:4px">' + detail + '</div>' : '') + '</div>');
+    $('#chk').innerHTML = rows.join('');
+  }
+  var fix = {
+    login: 'Google sent a <b>sign-in page</b>. In Apps Script: <b>Deploy → Manage deployments → ✏️</b>, set <b>Who has access</b> to <b>Anyone</b> (not "Anyone within your school" and not "Anyone with a Google account"), choose <b>Version: New version</b>, then Deploy. If "Anyone" is not offered, your school admin has blocked it: create the Sheet and script in a personal Gmail account instead (README step 2).',
+    error: 'The script has an error. Check all four files are in the project (<code>Settings</code>, <code>Code</code>, <code>Marking</code>, <code>AnswerKey</code>), run <code>authorise</code> once, then <b>Deploy → Manage deployments → ✏️ → Version: New version → Deploy</b>. A deployment keeps running the old code until you choose New version.',
+    network: 'The browser could not read a reply. Most often this is the same sign-in problem: the web app&rsquo;s <b>Who has access</b> is not set to <b>Anyone</b>. Also make sure the address ends in <code>/exec</code>. Test it: open the URL in a <b>private/incognito</b> window. You should see a line starting <code>{"ok":true</code>. If you see a Google sign-in page instead, fix <b>Who has access</b>.'
+  };
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec\/?$/.test(url)) {
+    add(false, 'The Apps Script URL in config.js looks wrong', 'It is: <code>' + esc(url || '(empty)') + '</code><br>It should look like <code>https://script.google.com/macros/s/AKfy…/exec</code>. Copy the <b>Web app URL</b> from <b>Deploy → Manage deployments</b>, not the address of the script editor. ' + (/\/dev\/?$/.test(url) ? 'Yours ends in <code>/dev</code>: that is the test URL, which only works for you when signed in. Use the one ending <code>/exec</code>.' : ''));
+    if (!/^https?:\/\//.test(url)) return;
+  } else add(true, 'The URL in config.js has the right shape');
+  add(null, 'Contacting the script…');
+  fetch(url, { redirect: 'follow' }).then(function (r) { return r.text(); }).then(function (t) {
+    rows.pop();
+    var j = null; try { j = JSON.parse(t); } catch (e) {}
+    if (!j) {
+      var login = /accounts\.google|ServiceLogin|Sign in/i.test(t);
+      add(false, login ? 'Google asked for a sign-in (the web app is not public)' : 'The script replied with a web page, not data', fix[login ? 'login' : 'error']); return;
+    }
+    add(true, 'The script is reachable', esc(j.message || ''));
+    return api({ action: 'ping' }).then(function (p) {
+      if (!p.ok) return add(false, 'The script rejected this test', esc(p.error || '') + (/key/i.test(p.error || '') ? '<br>Make <code>sharedKey</code> in config.js exactly the same as <code>SHARED_KEY</code> in Settings.gs, then deploy a <b>New version</b>.' : ''));
+      if (p.testId !== EXAM.meta.testId) return add(false, 'The script has a different answer key', 'Script: <code>' + esc(p.testId) + '</code>, this page: <code>' + esc(EXAM.meta.testId) + '</code>. Paste the matching <code>AnswerKey.gs</code> and deploy a New version.');
+      add(true, 'Shared key and answer key match', 'Answer key: <code>' + esc(p.testId) + '</code> (' + p.marks + ' marks). Start code required: <b>' + (p.startCode ? 'yes' : 'no') + '</b>.');
+      add(true, 'Everything is connected', 'Students can now take the test. Do one full run-through with your own email, then delete your row from the <b>Results</b> tab.');
+    });
+  }).catch(function (e) {
+    rows.pop();
+    add(false, e && e.kind === 'notjson' ? 'The script replied with a web page, not data' : 'The browser could not read a reply from the script', fix[e && e.kind === 'notjson' ? 'error' : 'network']);
+  });
+}
+
 var qs = new URLSearchParams(location.search);
 if (qs.has('reset')) {
   if (qs.get('reset') === CFG.resetCode) { try { localStorage.removeItem(SKEY); } catch (e) {} state = freshState(); }
   history.replaceState(null, '', location.pathname);
 }
 loadLocalKey(function () {
+  if (qs.has('check')) return showCheck();
   if (state.phase === 'exam') { if (Date.now() - state.startedAt >= DURATION) doSubmit(true); else showExam(); }
   else if (state.phase === 'submitting') { state.submitError = ''; showSubmitting(); submitNow(); }
   else if (state.phase === 'results' && state.result) { showResults(false); if (state.mail.status === 'sending' || state.mail.status === 'failed') { state.mail.status = 'sending'; renderMail(); sendReports(); } }
