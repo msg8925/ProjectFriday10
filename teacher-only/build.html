@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Build the test files</title>
+<style>
+body{font-family:Calibri,Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 16px;color:#1F2536;line-height:1.5}
+h1{font-family:Cambria,Georgia,serif;color:#1B2B5E}
+button{font:inherit;font-weight:600;background:#0D9488;color:#fff;border:0;border-radius:6px;padding:12px 20px;cursor:pointer;margin:0 8px 8px 0}
+.box{border-left:4px solid #1B2B5E;background:#F4F6FA;padding:10px 14px;margin:16px 0}
+.err{border-color:#B42318;background:#FCEBEA}
+table{border-collapse:collapse;margin-top:10px}td,th{border:1px solid #CBD2DE;padding:4px 10px;text-align:left}
+</style>
+<script src="helpers/logic-draw.js" onerror="void 0"></script>
+<script src="helpers/flow-draw.js" onerror="void 0"></script>
+<script src="exam-master.js"></script>
+<script src="build-lib.js"></script>
+</head>
+<body>
+<h1>Build the test files</h1>
+<p>Keep this page next to <code>exam-master.js</code>. After editing questions, reload this page and download the files below. (Or run <code>node build.js</code>, which writes them into the right folders for you.)</p>
+<div id="info" class="box"></div>
+<button data-f="questions.js">1. questions.js</button> → replace it in your GitHub repository<br>
+<button data-f="AnswerKey.gs">2. AnswerKey.gs</button> → paste over AnswerKey.gs in Apps Script, then Deploy → Manage deployments → New version<br>
+<button data-f="answer-key.js">3. answer-key.js</button> → save in this teacher-only folder (for previewing on your own computer)
+<script>
+var info = document.getElementById('info'), out;
+try {
+  out = buildOutputs(window.EXAM_MASTER);
+  var rows = Object.keys(out.bySection).map(function (k) { return '<tr><td>' + k + '</td><td>' + out.bySection[k] + ' marks</td></tr>'; }).join('');
+  info.innerHTML = '<b>' + out.questionCount + ' questions (' + out.partCount + ' parts), ' + out.total + ' marks.</b>' +
+    (out.problems.length ? '<br><span style="color:#B42318">' + out.problems.join('<br>') + '</span>' : '') + '<table>' + rows + '</table>';
+  if (out.problems.length) info.className = 'box err';
+} catch (e) { info.className = 'box err'; info.textContent = 'exam-master.js did not load: ' + e.message + ' (open the console with F12 for details).'; }
+document.body.addEventListener('click', function (e) {
+  var f = e.target.getAttribute && e.target.getAttribute('data-f'); if (!f || !out) return;
+  var text = f === 'questions.js' ? out.questionsJs : out.keyGs;
+  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' })); a.download = f; a.click();
+});
+</script>
+</body>
+</html>
